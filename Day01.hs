@@ -10,14 +10,17 @@ type Mass = Natural
 type Fuel = Natural
 
 requiredFuel :: Mass -> Fuel
-requiredFuel !m
-  | m' >= 2 = (m' - 2) + requiredFuel (m' - 2)
+requiredFuel m
+  | m' >= 2 = m' - 2
   | otherwise = 0
  where
   m' = m `div` 3
 
 moduleFuel :: Module -> Fuel
-moduleFuel m = requiredFuel m
+moduleFuel = go
+ where
+  go 0 = 0
+  go !x = requiredFuel x + go (requiredFuel x)
 
 main :: IO ()
 main = do
