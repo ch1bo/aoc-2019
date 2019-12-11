@@ -24,5 +24,5 @@ moduleFuel = go
 
 main :: IO ()
 main = do
-  modules <- fmap read . lines <$> readFile "input.txt"
+  modules <- fmap read . lines <$> readFile "day01-input.txt"
   print $ sum $ map moduleFuel (modules :: [Module])
