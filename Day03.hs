@@ -88,12 +88,13 @@ main = do
   -- let w2 = "U62,R66,U55,R34,D71,R55,D58,R83"
   -- let w1 = "R98,U47,R26,D63,R33,U87,L62,D20,R33,U53,R51"
   -- let w2 = "U98,R91,D20,R16,D67,R40,U7,R15,U6,R7"
+  let t1 = reverse $ traceWire $ parseWire w1
+  let t2 = reverse $ traceWire $ parseWire w2
 
-  -- NOTE(SN): init to drop (0,0) origin
-  let t1 = init $ traceWire $ parseWire w1
-  let t2 = init $ traceWire $ parseWire w2
+  -- Group by manhattan distance, NOTE(SN): init to drop (0,0) origin
+  let m1 = collect $ tail t1
+  let m2 = collect $ tail t2
+  print $ Map.toList $ Map.filter notNull $ Map.unionWith intersections m1 m2
 
-  -- Group by manhattan distance
-  let m1 = collect t1
-  let m2 = collect t2
-  print $ head $ Map.toList $ Map.filter notNull $ Map.unionWith intersections m1 m2
+  let is = foldMap id $ Map.unionWith intersections m1 m2
+  print $ head $ sort $ catMaybes $ map (\c -> (+) <$> elemIndex c t1 <*> elemIndex c t2) is
