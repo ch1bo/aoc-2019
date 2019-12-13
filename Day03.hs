@@ -3,10 +3,15 @@
 {-# LANGUAGE BangPatterns #-}
 module Main where
 
-import Control.Monad
-import Data.List.Extra
+import           Control.Monad
+import           Data.Function
+import           Data.List.Extra
+import           Data.Map        (Map)
+import           Data.Maybe
+import           Numeric.Natural
 
-import qualified Data.Set as Set
+import qualified Data.Map        as Map
+import qualified Data.Set        as Set
 
 type Wire = [Direction]
 
@@ -22,7 +27,7 @@ parseDirection ('R':s) = R $ read s
 parseDirection ('L':s) = L $ read s
 parseDirection ('U':s) = U $ read s
 parseDirection ('D':s) = D $ read s
-parseDirection _ = undefined
+parseDirection _       = undefined
 
 parseWire :: String -> Wire
 parseWire = map parseDirection . split (== ',')
@@ -32,25 +37,47 @@ type Coordinate = (Int, Int)
 type Path = [Coordinate]
 
 traceWire :: Wire -> Path
-traceWire = foldl' go []
+traceWire = foldl' go [(0,0)]
  where
   go :: Path -> Direction -> Path
-  go p (R n) = trace p (n, 0)
-  go p (L n) = trace p (-n, 0)
-  go p (U n) = trace p (0, n)
-  go p (D n) = trace p (0, -n)
+  go p (R n) = traceX p n
+  go p (L n) = traceX p (-n)
+  go p (U n) = traceY p n
+  go p (D n) = traceY p (-n)
 
-  trace :: Path -> (Int,Int) -> Path
-  trace [] delta = trace [(0,0)] delta
-  trace p@((x,y):_) (!dx,!dy)
-    | dx > 0 = trace ((x+1,y):p) (dx-1,dy)
-    | dy > 0 = trace ((x,y+1):p) (dx,dy-1)
-    | dx < 0 = trace ((x-1,y):p) (dx+1,dy)
-    | dy < 0 = trace ((x,y-1):p) (dx,dy+1)
+  traceX :: Path -> Int -> Path
+  traceX p@((x,y):_) !dx
+    | dx > 0 = traceX ((x+1,y):p) (dx-1)
+    | dx < 0 = traceX ((x-1,y):p) (dx+1)
     | otherwise = p
+  traceX p _ = p
 
-manhattan :: Coordinate -> Int
-manhattan (x,y) = x + y
+  traceY :: Path -> Int -> Path
+  traceY p@((x,y):_) !dy
+    | dy > 0 = traceY ((x,y+1):p) (dy-1)
+    | dy < 0 = traceY ((x,y-1):p) (dy+1)
+    | otherwise = p
+  traceY p _ = p
+
+manhattan :: Coordinate -> Natural
+manhattan (x,y) = toEnum $ abs x + abs y
+
+collect :: [Coordinate] -> Map Natural [Coordinate]
+collect = foldl' go mempty
+ where
+  go m c = let k = manhattan c
+           in  Map.alter (f k c) k m
+
+  f k c Nothing   = Just [c]
+  f k c (Just cs) = Just (c:cs)
+
+-- Naive brute force search using list monad
+intersections :: [Coordinate] -> [Coordinate] -> [Coordinate]
+intersections t1 t2 = do
+  c1 <- t1
+  c2 <- t2
+  guard (c1 == c2)
+  return c1
 
 main :: IO ()
 main = do
@@ -61,17 +88,12 @@ main = do
   -- let w2 = "U62,R66,U55,R34,D71,R55,D58,R83"
   -- let w1 = "R98,U47,R26,D63,R33,U87,L62,D20,R33,U53,R51"
   -- let w2 = "U98,R91,D20,R16,D67,R40,U7,R15,U6,R7"
+
   -- NOTE(SN): init to drop (0,0) origin
   let t1 = init $ traceWire $ parseWire w1
   let t2 = init $ traceWire $ parseWire w2
-  print $ length t1
-  print $ length t2
-  -- Naive brute force search using list monad
-  let intersections = do
-        c1 <- t1
-        c2 <- t2
-        guard (c1 == c2)
-        return c1
-  print intersections
-  print $ map manhattan intersections
-  print $ Set.findMin $ Set.fromList $ map manhattan intersections
+
+  -- Group by manhattan distance
+  let m1 = collect t1
+  let m2 = collect t2
+  print $ head $ Map.toList $ Map.filter notNull $ Map.unionWith intersections m1 m2
