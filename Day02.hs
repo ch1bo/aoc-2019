@@ -1,7 +1,8 @@
 #!/usr/bin/env stack
 -- stack script --resolver lts-14.4 --package text,bytestring,safe,vector,mtl
-{-# LANGUAGE LambdaCase    #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE TupleSections              #-}
 module Main where
 
 import           Control.Monad
@@ -28,28 +29,31 @@ data IntCode = IntCode { memory :: Memory
                        , pos    :: !Address
                        } deriving Show
 
-parseInstruction :: State IntCode (Maybe Instruction)
+newtype Computer a = Computer { runComputer :: State IntCode a }
+                   deriving (Functor, Applicative, Monad, MonadState IntCode)
+
+parseInstruction :: Computer Instruction
 parseInstruction = do
   op <- parseInt
   case op of
-    Just 1 -> do
+    1 -> do
       a <- parseInt
       b <- parseInt
       r <- parseInt
-      return $ Add <$> a <*> b <*> r -- TODO validate address ranges?
-    Just 2 -> do
+      return $ Add a b r -- TODO validate address ranges?
+    2 -> do
       a <- parseInt
       b <- parseInt
       r <- parseInt
-      return $ Multiply <$> a <*> b <*> r -- TODO validate address ranges?
-    Just 99 -> return $ Just Halt
-    _ -> return Nothing
+      return $ Multiply a b r -- TODO validate address ranges?
+    99 -> return Halt
+    _ -> (error "unknown opcode")
 
-parseInt :: State IntCode (Maybe Int)
+parseInt :: Computer Int
 parseInt = do
   i <- get
   put (i { pos = pos i + 1})
-  return $ lookupInt (pos i) i
+  maybe (error "not found") return $ lookupInt (pos i) i
 
 lookupInt :: Address -> IntCode -> Maybe Int
 lookupInt a i = memory i !? a
@@ -58,8 +62,8 @@ runIntCode :: Memory -> Maybe IntCode
 runIntCode is = go $ IntCode is 0
  where
   go i = do
-    let (op, i') = runState parseInstruction i
-    op >>= \case
+    let (op, i') = runState (runComputer parseInstruction) i
+    case op of
       Add a b r -> do
         x <- lookupInt a i
         y <- lookupInt b i
