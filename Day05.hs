@@ -1,5 +1,5 @@
 #!/usr/bin/env stack
--- stack script --resolver lts-14.4 --package text,bytestring,safe,vector,mtl
+-- stack script --resolver lts-14.4 --package text,bytestring,vector,mtl
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE TupleSections              #-}
@@ -11,7 +11,6 @@ import           Control.Monad.State
 import           Data.Foldable
 import           Data.Vector            (Vector, (!), (//))
 import           Numeric.Natural
-import           Safe
 
 import qualified Data.ByteString        as BS
 import qualified Data.Text              as Text
@@ -24,11 +23,16 @@ type Memory = Vector Int
 
 type Address = Int
 
-data Instruction = Add Address Address Address
-                 | Multiply Address Address Address
+data Parameter = Position Address
+               | Immediate Int
+               deriving Show
+
+data Instruction = Add Parameter Parameter Address
+                 | Multiply Parameter Parameter Address
                  | Input Address
                  | Output Address
                  | Halt
+                 deriving Show
 
 data IntCode = IntCode { memory :: Memory
                        , pos    :: !Address
@@ -39,25 +43,6 @@ newtype Computer m a = Computer { unComputer :: StateT IntCode m a }
 
 runComputer :: Monad m => Computer m a -> IntCode -> m a
 runComputer (Computer a) i = runStateT a i >>= \(a, i) -> return a
-
-parseInstruction :: Monad m => Computer m Instruction
-parseInstruction = do
-  op <- parseInt
-  case op of
-    1 -> do
-      a <- parseInt
-      b <- parseInt
-      r <- parseInt
-      return $ Add a b r -- TODO validate address ranges?
-    2 -> do
-      a <- parseInt
-      b <- parseInt
-      r <- parseInt
-      return $ Multiply a b r -- TODO validate address ranges?
-    3 -> Input <$> parseInt
-    4 -> Output <$> parseInt
-    99 -> return Halt
-    i -> error $ "unknown opcode: " ++ show i
 
 parseInt :: Monad m => Computer m Int
 parseInt = do
@@ -72,6 +57,34 @@ lookupInt a = gets (\i -> memory i ! a)
 modifyMemory :: Monad m => (Memory -> Memory) -> Computer m ()
 modifyMemory f = modify (\i -> i { memory = f $ memory i })
 
+parseParameter :: Monad m => Int -> Computer m Parameter
+parseParameter 0 = Position <$> parseInt
+parseParameter 1 = Immediate <$> parseInt
+parseParameter m = error $ "invalid parameter mode: " ++ show m
+
+parameterValue :: Monad m => Parameter -> Computer m Int
+parameterValue (Position a)  = lookupInt a
+parameterValue (Immediate v) = pure v
+
+parseInstruction :: Monad m => Computer m Instruction
+parseInstruction = do
+  ins <- parseInt
+  let op = ins `mod` 100
+  let p1 = ins `div` 100 `mod` 10
+  let p2 = ins `div` 1000 `mod` 10
+  case op of
+    1 -> Add <$> parseParameter p1
+             <*> parseParameter p2
+             <*> parseInt
+    2 -> Multiply
+      <$> parseParameter p1
+      <*> parseParameter p2
+      <*> parseInt
+    3 -> Input <$> parseInt
+    4 -> Output <$> parseInt
+    99 -> return Halt
+    i -> error $ "unknown opcode: " ++ show i
+
 runIntCode :: Memory -> IO IntCode
 runIntCode is = runComputer (go >> get) $ IntCode is 0
  where
@@ -79,13 +92,13 @@ runIntCode is = runComputer (go >> get) $ IntCode is 0
     op <- parseInstruction
     case op of
       Add a b r -> do
-        x <- lookupInt a
-        y <- lookupInt b
+        x <- parameterValue a
+        y <- parameterValue b
         modifyMemory (// [(r, x + y)])
         go
       Multiply a b r -> do
-        x <- lookupInt a
-        y <- lookupInt b
+        x <- parameterValue a
+        y <- parameterValue b
         modifyMemory (// [(r, x * y)])
         go
       Input a -> do
