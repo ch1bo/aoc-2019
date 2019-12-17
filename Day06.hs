@@ -1,13 +1,16 @@
 #!/usr/bin/env stack
 -- stack script --resolver lts-14.4 --package containers
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
+import           Control.Monad
 import           Data.List
-import           Data.Map    (Map)
-import qualified Data.Map    as Map
-import           Data.Set    (Set)
-import qualified Data.Set    as Set
+import           Data.Map      (Map)
+import qualified Data.Map      as Map
+import           Data.Maybe
+import           Data.Set      (Set)
+import qualified Data.Set      as Set
 import           Debug.Trace
 
 type OrbitMap = Map String (Set String)
@@ -31,6 +34,29 @@ orbitCountChecksum om = go 0 "COM" 0
       Just os -> foldr (go (depth + 1)) (sum + depth) os
       Nothing -> sum + depth
 
+path :: String -> OrbitMap -> Maybe [String]
+path target om = go "COM"
+ where
+  go :: String -> Maybe [String]
+  go k
+    | k == target = Just [k]
+    | otherwise = do
+      os <- Map.lookup k om
+      p <- listToMaybe $ catMaybes $ map go $ Set.toList os
+      pure $ k:p
+
+-- Calculate required orbital transfers by finding a common orbit
+orbitalTransfers :: String -> String -> OrbitMap -> Maybe Int
+orbitalTransfers from to om = do
+  fp <- path from om
+  tp <- path to om
+  let cl = length $ commonPrefix fp tp
+  pure $ length fp + length tp - 2 * cl - 2
+ where
+  commonPrefix (a:as) (b:bs)
+    | a == b = a:(commonPrefix as bs)
+  commonPrefix _ _ = []
+
 main :: IO ()
 main = do
   input <- lines <$> readFile "day06-input.txt"
@@ -45,7 +71,12 @@ main = do
   --             , "E)J"
   --             , "J)K"
   --             , "K)L"
+  --             , "K)L"
+  --             , "K)YOU"
+  --             , "I)SAN"
   --             ]
   let orbits = parseOrbits input
-  -- print orbits
   print $ orbitCountChecksum orbits
+  -- print $ path "YOU" orbits
+  -- print $ path "SAN" orbits
+  print $ orbitalTransfers "YOU" "SAN" orbits
