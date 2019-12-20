@@ -48,8 +48,8 @@ data IntCode = IntCode { memory  :: Memory
 newtype Computer m a = Computer { unComputer :: StateT IntCode m a }
                      deriving (Functor, Applicative, Monad, MonadState IntCode, MonadIO, MonadFail)
 
-runComputer :: Monad m => Computer m a -> IntCode -> m IntCode
-runComputer (Computer a) i = runStateT a i >>= \(a, i) -> return i
+runComputer :: Monad m => Computer m a -> IntCode -> m (a, IntCode)
+runComputer (Computer a) i = runStateT a i
 
 parseInt :: Monad m => Computer m Int
 parseInt = do
@@ -110,8 +110,15 @@ popInput =
 pushOutput :: Monad m => Int -> Computer m ()
 pushOutput o = modify (\ic -> ic { outputs = o : outputs ic })
 
-runIntCode :: MonadFail m => Memory -> [Int] -> m [Int]
-runIntCode mem is = fmap outputs . runComputer go $ IntCode mem 0 is []
+initIntCode :: Memory -> [Int] -> IntCode
+initIntCode mem is = IntCode mem 0 is []
+
+-- | Step an intcode computer means translation of one input until Just one
+-- output is produced or Nothing if it halted.
+stepIntCode :: MonadFail m => IntCode -> Int -> m (Maybe Int, IntCode)
+stepIntCode ic i = runComputer go (ic { inputs = i : inputs ic })
+-- runIntCode :: MonadFail m => Memory -> [Int] -> m [Int]
+-- runIntCode mem is = fmap outputs . runComputer go $ IntCode mem 0 is []
  where
   go = do
     op <- parseInstruction
@@ -130,9 +137,7 @@ runIntCode mem is = fmap outputs . runComputer go $ IntCode mem 0 is []
         v <- popInput
         modifyMemory (// [(a, v)])
         go
-      Output a -> do
-        lookupInt a >>= pushOutput
-        go
+      Output a -> lookupInt a >>= return . Just
       JumpIfTrue a to -> do
         x <- parameterValue a
         when (x /= 0) $ parameterValue to >>= jump
@@ -151,16 +156,40 @@ runIntCode mem is = fmap outputs . runComputer go $ IntCode mem 0 is []
         y <- parameterValue b
         modifyMemory (// [(r, if x == y then 1 else 0)])
         go
-      Halt -> pure ()
+      Halt -> return Nothing
 
 type Phase = Int
 
-amplifier :: Memory -> Phase -> [Int] -> IO [Int]
-amplifier mem p is = runIntCode mem (p:is)
+initAmplifier :: Memory -> Phase -> IntCode
+initAmplifier mem p = initIntCode mem [p]
+
+stepAmplifier :: IntCode -> Int -> IO (Maybe Int, IntCode)
+stepAmplifier = stepIntCode
 
 phaseSequence :: Memory -> [Int] -> IO Int
-phaseSequence m [a,b,c,d,e] = fmap head $
-  amplifier m a [0] >>= amplifier m b >>= amplifier m c >>= amplifier m d >>= amplifier m e
+phaseSequence m [a,b,c,d,e] =
+  loop (initAmplifier m a)
+       (initAmplifier m b)
+       (initAmplifier m c)
+       (initAmplifier m d)
+       (initAmplifier m e) 0
+ where
+  -- TODO(SN): MaybeT
+  loop as bs cs ds es input =
+    stepAmplifier as input >>= \case
+      (Nothing, _) -> return input
+      (Just ar, as') -> do
+        putStrLn $ "A: " ++ show ar
+        (Just br, bs') <- stepAmplifier bs ar
+        putStrLn $ "B: " ++ show br
+        (Just cr, cs') <- stepAmplifier cs br
+        putStrLn $ "C: " ++ show cr
+        (Just dr, ds') <- stepAmplifier ds cr
+        putStrLn $ "D: " ++ show dr
+        (Just er, es') <- stepAmplifier es dr
+        putStrLn $ "E: " ++ show er
+        loop as' bs' cs' ds' es' er
+
 phaseSequence memory _ = error "invalid phase sequence"
 
 main :: IO ()
@@ -169,10 +198,9 @@ main = do
     . map (read . Text.unpack)
     . (Text.split (== ',') . Text.decodeUtf8)
     <$> BS.readFile "day07-input.txt"
-
-  -- print =<< amplifier program 0 [0]
-  -- print =<< phaseSequence program [3,1,2,4,0]
-  res <- fmap maximum . mapM (phaseSequence program) $ permutations [0,1,2,3,4]
-  print res
+  -- let program = Vector.fromList [3,52,1001,52,-5,52,3,53,1,52,56,54,1007,54,5,55,1005,55,26,1001,54,-5,54,1105,1,12,1,53,54,53,1008,54,0,55,1001,55,1,55,2,53,55,53,4,53,1001,56,-1,56,1005,56,6,99,0,0,0,0,10]
+  print =<< phaseSequence program [9,7,8,5,6]
+  -- res <- fmap maximum . mapM (phaseSequence program) $ permutations [5,6,7,8,9]
+  -- print res
   -- res <- mapM (\ps -> phaseSequence program ps >>= \res -> return (ps,res)) $ permutations [0,1,2,3,4]
   -- print $ maximumBy (compare `on` snd) res
