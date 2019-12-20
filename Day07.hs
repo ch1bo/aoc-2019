@@ -1,24 +1,28 @@
 #!/usr/bin/env stack
--- stack script --resolver lts-14.4 --package text,bytestring,vector,mtl,transformers
+-- stack script --resolver lts-14.4 --package text,bytestring,vector,mtl,async
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE TupleSections              #-}
 module Main where
 
+import           Debug.Trace
+
+import           Control.Concurrent.Async
+import           Control.Concurrent.Chan
 import           Control.Monad
-import           Control.Monad.Fail
 import           Control.Monad.IO.Class
 import           Control.Monad.State
 import           Data.Foldable
 import           Data.Function
 import           Data.List
-import           Data.Vector            (Vector, (!), (//))
+import           Data.Maybe
+import           Data.Vector              (Vector, (!), (//))
 import           Numeric.Natural
 
-import qualified Data.ByteString        as BS
-import qualified Data.Text              as Text
-import qualified Data.Text.Encoding     as Text
-import qualified Data.Vector            as Vector
+import qualified Data.ByteString          as BS
+import qualified Data.Text                as Text
+import qualified Data.Text.Encoding       as Text
+import qualified Data.Vector              as Vector
 
 type Memory = Vector Int
 
@@ -39,17 +43,15 @@ data Instruction = Add Parameter Parameter Address
                  | Halt
                  deriving Show
 
-data IntCode = IntCode { memory  :: Memory
-                       , pos     :: !Address
-                       , inputs  :: [Int]
-                       , outputs :: [Int]
+data IntCode = IntCode { memory :: Memory
+                       , pos    :: !Address
                        } deriving Show
 
 newtype Computer m a = Computer { unComputer :: StateT IntCode m a }
-                     deriving (Functor, Applicative, Monad, MonadState IntCode, MonadIO, MonadFail)
+                     deriving (Functor, Applicative, Monad, MonadState IntCode, MonadIO)
 
-runComputer :: Monad m => Computer m a -> IntCode -> m (a, IntCode)
-runComputer (Computer a) i = runStateT a i
+runComputer :: Monad m => Computer m a -> IntCode -> m a
+runComputer (Computer a) i = runStateT a i >>= \(a, i) -> return a
 
 parseInt :: Monad m => Computer m Int
 parseInt = do
@@ -99,96 +101,67 @@ parseInstruction = do
     99 -> return Halt
     i -> error $ "unknown opcode: " ++ show i
 
-popInput :: MonadFail m => Computer m Int
-popInput =
-  gets inputs >>= \case
-    [] -> error "no input left"
-    (i:is) -> do
-      modify (\ic -> ic { inputs = is })
-      return i
-
-pushOutput :: Monad m => Int -> Computer m ()
-pushOutput o = modify (\ic -> ic { outputs = o : outputs ic })
-
-initIntCode :: Memory -> [Int] -> IntCode
-initIntCode mem is = IntCode mem 0 is []
-
--- | Step an intcode computer means translation of one input until Just one
--- output is produced or Nothing if it halted.
-stepIntCode :: MonadFail m => IntCode -> Int -> m (Maybe Int, IntCode)
-stepIntCode ic i = runComputer go (ic { inputs = i : inputs ic })
--- runIntCode :: MonadFail m => Memory -> [Int] -> m [Int]
--- runIntCode mem is = fmap outputs . runComputer go $ IntCode mem 0 is []
+runAmplifier :: Memory -> String -> Chan Int -> Chan Int -> IO (Maybe Int)
+runAmplifier mem name ic oc =
+  runComputer (go ic oc Nothing) $ IntCode mem 0
  where
-  go = do
+  go ic oc res = trace (name ++ " res: " ++ show res) $ do
     op <- parseInstruction
     case op of
       Add a b r -> do
         x <- parameterValue a
         y <- parameterValue b
         modifyMemory (// [(r, x + y)])
-        go
+        go ic oc res
       Multiply a b r -> do
         x <- parameterValue a
         y <- parameterValue b
         modifyMemory (// [(r, x * y)])
-        go
+        go ic oc res
       Input a -> do
-        v <- popInput
-        modifyMemory (// [(a, v)])
-        go
-      Output a -> lookupInt a >>= return . Just
+        v <- liftIO $ readChan ic
+        trace (name ++ " input: " ++ show v) $ modifyMemory (// [(a, v)])
+        go ic oc res
+      Output a -> do
+        v <- lookupInt a
+        trace (name ++ " output: " ++ show v) $ liftIO $ writeChan oc v
+        go ic oc (Just v)
       JumpIfTrue a to -> do
         x <- parameterValue a
         when (x /= 0) $ parameterValue to >>= jump
-        go
+        go ic oc res
       JumpIfFalse a to -> do
         x <- parameterValue a
         when (x == 0) $ parameterValue to >>= jump
-        go
+        go ic oc res
       LessThan a b r -> do
         x <- parameterValue a
         y <- parameterValue b
         modifyMemory (// [(r, if x < y then 1 else 0)])
-        go
+        go ic oc res
       Equals a b r -> do
         x <- parameterValue a
         y <- parameterValue b
         modifyMemory (// [(r, if x == y then 1 else 0)])
-        go
-      Halt -> return Nothing
-
-type Phase = Int
-
-initAmplifier :: Memory -> Phase -> IntCode
-initAmplifier mem p = initIntCode mem [p]
-
-stepAmplifier :: IntCode -> Int -> IO (Maybe Int, IntCode)
-stepAmplifier = stepIntCode
+        go ic oc res
+      Halt -> trace (name ++ " halted") $ pure res
 
 phaseSequence :: Memory -> [Int] -> IO Int
-phaseSequence m [a,b,c,d,e] =
-  loop (initAmplifier m a)
-       (initAmplifier m b)
-       (initAmplifier m c)
-       (initAmplifier m d)
-       (initAmplifier m e) 0
- where
-  -- TODO(SN): MaybeT
-  loop as bs cs ds es input =
-    stepAmplifier as input >>= \case
-      (Nothing, _) -> return input
-      (Just ar, as') -> do
-        putStrLn $ "A: " ++ show ar
-        (Just br, bs') <- stepAmplifier bs ar
-        putStrLn $ "B: " ++ show br
-        (Just cr, cs') <- stepAmplifier cs br
-        putStrLn $ "C: " ++ show cr
-        (Just dr, ds') <- stepAmplifier ds cr
-        putStrLn $ "D: " ++ show dr
-        (Just er, es') <- stepAmplifier es dr
-        putStrLn $ "E: " ++ show er
-        loop as' bs' cs' ds' es' er
+phaseSequence m [a,b,c,d,e] = do
+  ain <- newChan
+  bin <- newChan
+  cin <- newChan
+  din <- newChan
+  ein <- newChan
+  _ <- writeChan ain a >> async (runAmplifier m "A" ain bin)
+  _ <- writeChan bin b >> async (runAmplifier m "B" bin cin)
+  _ <- writeChan cin c >> async (runAmplifier m "C" cin din)
+  _ <- writeChan din d >> async (runAmplifier m "D" din ein)
+  ampe <- writeChan ein e >> async (runAmplifier m "E" ein ain)
+  writeChan ain 0
+  wait ampe >>= \case
+    Nothing -> error "amplifier E never produced output"
+    Just res -> return res
 
 phaseSequence memory _ = error "invalid phase sequence"
 
@@ -199,8 +172,9 @@ main = do
     . (Text.split (== ',') . Text.decodeUtf8)
     <$> BS.readFile "day07-input.txt"
   -- let program = Vector.fromList [3,52,1001,52,-5,52,3,53,1,52,56,54,1007,54,5,55,1005,55,26,1001,54,-5,54,1105,1,12,1,53,54,53,1008,54,0,55,1001,55,1,55,2,53,55,53,4,53,1001,56,-1,56,1005,56,6,99,0,0,0,0,10]
-  print =<< phaseSequence program [9,7,8,5,6]
+  -- let program = Vector.fromList [3,26,1001,26,-4,26,3,27,1002,27,2,27,1,27,26,27,4,27,1001,28,-1,28,1005,28,6,99,0,0,5]
+  -- print =<< phaseSequence program [9,7,8,5,6]
   -- res <- fmap maximum . mapM (phaseSequence program) $ permutations [5,6,7,8,9]
   -- print res
-  -- res <- mapM (\ps -> phaseSequence program ps >>= \res -> return (ps,res)) $ permutations [0,1,2,3,4]
-  -- print $ maximumBy (compare `on` snd) res
+  res <- mapM (\ps -> phaseSequence program ps >>= \res -> return (ps,res)) $ permutations [5,6,7,8,9]
+  print $ maximumBy (compare `on` snd) res
