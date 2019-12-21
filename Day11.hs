@@ -18,6 +18,7 @@ import           Data.Map                 (Map)
 import           Data.Maybe
 import           Data.Vector              (Vector, (!?), (//))
 import           Debug.Trace
+import           Text.Printf
 
 import qualified Data.ByteString          as BS
 import qualified Data.Map                 as Map
@@ -140,9 +141,9 @@ runIntCodeIO mem = do
 
 runIntCodeChan :: Memory -> Chan Integer -> Chan Integer -> IO (Maybe Integer)
 runIntCodeChan mem ic oc =
-  runComputer (go ic oc Nothing) $ IntCode mem 0 0
+  runComputer (drawRow ic oc Nothing) $ IntCode mem 0 0
  where
-  go ic oc res = do
+  drawRow ic oc res = do
     op <- parseInstruction
     -- case trace (show op) op of
     case op of
@@ -150,42 +151,42 @@ runIntCodeChan mem ic oc =
         x <- lookupParameter a
         y <- lookupParameter b
         writeParameter r (x + y)
-        go ic oc res
+        drawRow ic oc res
       Multiply a b r -> do
         x <- lookupParameter a
         y <- lookupParameter b
         writeParameter r (x * y)
-        go ic oc res
+        drawRow ic oc res
       Input a -> do
         v <- liftIO $ readChan ic
         writeParameter a v
-        go ic oc res
+        drawRow ic oc res
       Output a -> do
         v <- lookupParameter a
         liftIO $ writeChan oc v
-        go ic oc (Just v)
+        drawRow ic oc (Just v)
       JumpIfTrue a to -> do
         x <- lookupParameter a
         when (x /= 0) $ lookupParameter to >>= jump . fromInteger
-        go ic oc res
+        drawRow ic oc res
       JumpIfFalse a to -> do
         x <- lookupParameter a
         when (x == 0) $ lookupParameter to >>= jump . fromInteger
-        go ic oc res
+        drawRow ic oc res
       LessThan a b r -> do
         x <- lookupParameter a
         y <- lookupParameter b
         writeParameter r (if x < y then 1 else 0)
-        go ic oc res
+        drawRow ic oc res
       Equals a b r -> do
         x <- lookupParameter a
         y <- lookupParameter b
         writeParameter r (if x == y then 1 else 0)
-        go ic oc res
+        drawRow ic oc res
       RelativeBaseOffset a -> do
         x <- lookupParameter a
         offsetBase (fromInteger x)
-        go ic oc res
+        drawRow ic oc res
       Halt -> pure res
 
 -- New code
@@ -207,7 +208,7 @@ runRobot m = do
   ic <- newChan
   oc <- newChan
   comp <- async (runIntCodeChan m ic oc)
-  loop ic oc U (0,0) mempty (done comp)
+  loop ic oc U (0,0) (Map.singleton (0,0) 1) (done comp)
  where
   done = fmap isJust . poll
 
@@ -215,15 +216,10 @@ runRobot m = do
     done >>= \case
       True -> return path
       False -> do
-        -- liftIO $ putStrLn $ "lookup: " ++ show (lookupColor path pos)
         writeChan ic $ toInteger $ lookupColor path pos
-        -- liftIO $ putStrLn $ "lookup: " ++ show (lookupColor path pos)
-
         c <- fromInteger <$> readChan oc
-        -- liftIO $ putStrLn $ "color: " ++ show c
         let path' = paintColor pos c path
         turn <- readChan oc
-        -- liftIO $ putStrLn $ "turn: " ++ show turn
         let (dir', pos') = case (dir, turn) of
                             -- turn left
                             (U, 0) -> (L, (x-1,y))
@@ -235,9 +231,18 @@ runRobot m = do
                             (R, 1) -> (D, (x,y+1))
                             (D, 1) -> (L, (x-1,y))
                             (L, 1) -> (U, (x,y-1))
-        -- liftIO $ putStrLn $ "dir': " ++ show dir'
-        -- liftIO $ putStrLn $ "pos': " ++ show pos'
         loop ic oc dir' pos' path' done
+
+drawPath :: Int -> Int -> Int -> Int -> Path -> [String]
+drawPath minx maxx miny maxy path =
+  foldr drawRow [] [miny..maxy]
+ where
+  drawRow y rs = foldr (drawPixel y) [] [minx..maxx] : rs
+
+  drawPixel y x ps = (maybe ' ' draw $ Map.lookup (x,y) path) : ps
+
+  draw 1 = '#'
+  draw _ = ' '
 
 main :: IO ()
 main = do
@@ -245,4 +250,10 @@ main = do
     . map (read . Text.unpack)
     . (Text.split (== ',') . Text.decodeUtf8)
     <$> BS.readFile "day11-input.txt"
-  print . length =<< runRobot program
+  path <- runRobot program
+  print $ length path
+  printf "x: %d, " $ minimum $ map fst $ Map.keys path
+  printf "%d\n" $ maximum $ map fst $ Map.keys path
+  printf "y: %d, " $ minimum $ map snd $ Map.keys path
+  printf "%d\n" $ maximum $ map snd $ Map.keys path
+  putStrLn $ unlines $ drawPath (-10) 50 (-10) 10  path
