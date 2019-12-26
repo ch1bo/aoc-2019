@@ -6,6 +6,7 @@ module Main where
 import Debug.Trace
 
 import Data.List
+import Data.Maybe
 import Data.Foldable
 
 import qualified Data.HashMap.Lazy as Map
@@ -50,24 +51,31 @@ totalEnergy = foldr energy 0
 
   kin m = abs (velX m) + abs (velY m) + abs (velZ m)
 
+periods :: [[Moon]] -> (Int,Int,Int)
+periods [] = (0,0,0)
+periods (m0:ms) = go 1 (Nothing,Nothing,Nothing) ms
+ where
+  go _ (Just px, Just py, Just pz) _ = (px,py,pz)
+  go _ _ [] = (0,0,0)
+  go !i (px,py,pz) (m:ms) =
+    go (i+1) ( if atStartX m then Just (fromMaybe i px) else px
+             , if atStartY m then Just (fromMaybe i py) else py
+             , if atStartZ m then Just (fromMaybe i pz) else pz
+             ) ms
+
+  atStartX m = all (\(a,a0) -> velX a == 0 && posX a == posX a0) $ zip m m0
+  atStartY m = all (\(a,a0) -> velY a == 0 && posY a == posY a0) $ zip m m0
+  atStartZ m = all (\(a,a0) -> velZ a == 0 && posZ a == posZ a0) $ zip m m0
+
 main :: IO ()
 main = do
   -- part one
   print $ totalEnergy $ iterate simulateStep ms !! 1000
   -- part two
-  print $ foldlM twoSame (0,Map.empty) $ iterate simulateStep ms
+  let (a,b,c) = periods $ iterate simulateStep ms
+  print (a,b,c)
+  print $ lcm (lcm a b) c
  where
-  twoSame (!i,m) ms =
-    let e = totalEnergy ms
-    in case Map.lookup e m of
-      Just ms' | any (== ms) ms' -> Left i
-      _ -> if i `mod` 1000 == 0
-           then trace (show i) Right (i+1,Map.alter (prepend ms) e m)
-           else Right (i+1,Map.alter (prepend ms) e m)
-
-  prepend a Nothing = Just [a]
-  prepend a (Just as) = Just (a:as)
-
   ms = [m1,m2,m3,m4]
   m1 = mkMoon 4 1 1
   m2 = mkMoon 11 (-18) (-1)
