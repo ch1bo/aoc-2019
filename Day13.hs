@@ -137,9 +137,9 @@ instance ComputerIO m => ComputerIO (StateT IntCode m) where
   input = lift $ input
   output = lift . output
 
-runComputer :: ComputerIO m => Memory -> m ()
+runComputer :: ComputerIO m => Memory -> m Memory
 runComputer mem =
-  void . runStateT go $ IntCode mem 0 0
+  fmap memory . execStateT go $ IntCode mem 0 0
  where
   go = do
     op <- parseInstruction
@@ -193,10 +193,55 @@ instance ComputerIO IO where
 
 -- * Day13 code
 
+newtype Arcade a = Arcade (StateT UI IO a)
+                 deriving (Functor, Applicative, Monad, MonadIO, MonadState UI)
+
+data UI = UI { unfinishedTile :: UnfinishedTile
+             , blockTiles :: Int
+             }
+
+type UnfinishedTile = [Integer]
+
+data TileId = Empty | Wall | Block | Paddle | Ball deriving Show
+
+parseTileId :: Integer -> TileId
+parseTileId 0 = Empty
+parseTileId 1 = Wall
+parseTileId 2 = Block
+parseTileId 3 = Paddle
+parseTileId 4 = Ball
+parseTileId i = error $ "no valid tile id (" ++ show i ++ ") - should error differently"
+
+data Tile = Tile { x :: Integer
+                 , y :: Integer
+                 , id :: TileId
+                 } deriving Show
+
+runArcade :: Arcade a -> IO a
+runArcade (Arcade a)= evalStateT a (UI [] 0)
+
+instance ComputerIO Arcade where
+  input = liftIO readLn
+  output i = collectTile i >>= \case
+    Just (Tile _ _ Block) -> modify (\s -> s { blockTiles = blockTiles s + 1 })
+    _ -> return ()
+
+collectTile :: Integer -> Arcade (Maybe Tile)
+collectTile i =
+  gets unfinishedTile >>= \case
+    [y,x] -> do
+      modify (\s -> s { unfinishedTile = [] })
+      return $ Just (Tile x y $ parseTileId i)
+    is -> do
+      modify (\s -> s { unfinishedTile = (i:is) })
+      return Nothing
+
 main :: IO ()
 main = do
   program <- Vector.fromList
     . map (read . Text.unpack)
     . (Text.split (== ',') . Text.decodeUtf8)
     <$> BS.readFile "day13-input.txt"
-  runComputer program
+  -- part one
+  cnt <- runArcade $ void (runComputer program) >> gets blockTiles
+  print cnt
