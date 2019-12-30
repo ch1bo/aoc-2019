@@ -198,10 +198,12 @@ newtype Arcade a = Arcade (StateT Game IO a)
 data Game = Game { unfinishedTile :: UnfinishedTile
                  , tiles          :: Vector (Vector Tile)
                  , score          :: Int
+                 , ballX          :: Int
+                 , paddleX        :: Int
                  }
 
 initGame :: Int -> Int -> Game
-initGame rows cols = Game [] (Vector.replicate rows (Vector.replicate cols Empty)) 0
+initGame rows cols = Game [] (Vector.replicate rows (Vector.replicate cols Empty)) 0 0 0
 
 type UnfinishedTile = [Integer]
 
@@ -221,14 +223,25 @@ runArcade rows cols (Arcade a)= evalStateT a $ initGame rows cols
 instance ComputerIO Arcade where
   input = do
     drawUI
-    liftIO $ getChar >>= \case
-      'a' -> return (-2)
-      'd' -> return 2
-      _ -> return 0
+    playBot
+   where
+    playBot = do
+      bx <- gets ballX
+      px <- gets paddleX
+      return $ toInteger $ signum(bx - px)
+
+    -- playManual = do
+    --   liftIO (getChar) >>= \case
+    --     'a' -> return (-1)
+    --     'd' -> return 1
+    --     _ -> return 0
 
   output i = collectTriple i >>= \case
     Just (-1,0,s) -> modify (\g -> g { score = s})
-    Just (x,y,t) -> maybe (return ()) (setTile x y) $ parseTileId t
+    Just (x,y,t) -> case parseTileId t of
+      Just Ball   -> setTile x y Ball >> modify (\g -> g { ballX = x })
+      Just Paddle -> setTile x y Paddle >> modify (\g-> g { paddleX = x })
+      Just tile   -> setTile x y tile
     Nothing -> return ()
 
 collectTriple :: Integer -> Arcade (Maybe (Int,Int,Int))
@@ -275,7 +288,8 @@ main = do
     . (Text.split (== ',') . Text.decodeUtf8)
     <$> BS.readFile "day13-input.txt"
   -- part one
-  -- cnt <- runArcade 25 44 $ void (runComputer program) >> length . filter (== Block) <$> allTiles
-  -- print cnt
+  cnt <- runArcade 25 44 $ void (runComputer program) >> length . filter (== Block) <$> allTiles
+  print cnt
   -- part two
-  runArcade 24 44 $ void (runComputer $ program // [(0, 2)])
+  g <- runArcade 24 44 $ void (runComputer $ program // [(0, 2)]) >> get
+  drawScore g
