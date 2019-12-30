@@ -1,16 +1,13 @@
 #!/usr/bin/env stack
--- stack script --resolver lts-14.4 --package text,bytestring,vector,mtl,async
+-- stack script --resolver lts-14.4 --package text,bytestring,vector,mtl
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE FlexibleContexts              #-}
-{-# LANGUAGE FlexibleInstances              #-}
-{-# LANGUAGE ConstraintKinds              #-}
 module Main where
-
 import           Control.Concurrent
-import           Control.Concurrent.Async
-import           Control.Concurrent.Chan
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.State
@@ -18,13 +15,13 @@ import           Data.Foldable
 import           Data.Function
 import           Data.List
 import           Data.Maybe
-import           Data.Vector              (Vector, (!?), (//))
+import           Data.Vector            (Vector, (!), (!?), (//))
 import           Debug.Trace
 
-import qualified Data.ByteString          as BS
-import qualified Data.Text                as Text
-import qualified Data.Text.Encoding       as Text
-import qualified Data.Vector              as Vector
+import qualified Data.ByteString        as BS
+import qualified Data.Text              as Text
+import qualified Data.Text.Encoding     as Text
+import qualified Data.Vector            as Vector
 
 -- * IntCode computer
 
@@ -193,48 +190,83 @@ instance ComputerIO IO where
 
 -- * Day13 code
 
-newtype Arcade a = Arcade (StateT UI IO a)
-                 deriving (Functor, Applicative, Monad, MonadIO, MonadState UI)
+-- ** Game Logic / computer glue-code
 
-data UI = UI { unfinishedTile :: UnfinishedTile
-             , blockTiles :: Int
-             }
+newtype Arcade a = Arcade (StateT Game IO a)
+                 deriving (Functor, Applicative, Monad, MonadIO, MonadState Game)
+
+data Game = Game { unfinishedTile :: UnfinishedTile
+                 , tiles          :: Vector (Vector Tile)
+                 , score          :: Int
+                 }
+
+initGame :: Int -> Int -> Game
+initGame rows cols = Game [] (Vector.replicate rows (Vector.replicate cols Empty)) 0
 
 type UnfinishedTile = [Integer]
 
-data TileId = Empty | Wall | Block | Paddle | Ball deriving Show
+data Tile = Empty | Wall | Block | Paddle | Ball deriving (Eq, Show)
 
-parseTileId :: Integer -> TileId
-parseTileId 0 = Empty
-parseTileId 1 = Wall
-parseTileId 2 = Block
-parseTileId 3 = Paddle
-parseTileId 4 = Ball
-parseTileId i = error $ "no valid tile id (" ++ show i ++ ") - should error differently"
+parseTileId :: Int -> Maybe Tile
+parseTileId 0 = Just Empty
+parseTileId 1 = Just Wall
+parseTileId 2 = Just Block
+parseTileId 3 = Just Paddle
+parseTileId 4 = Just Ball
+parseTileId _ = Nothing
 
-data Tile = Tile { x :: Integer
-                 , y :: Integer
-                 , id :: TileId
-                 } deriving Show
-
-runArcade :: Arcade a -> IO a
-runArcade (Arcade a)= evalStateT a (UI [] 0)
+runArcade :: Int -> Int -> Arcade a -> IO a
+runArcade rows cols (Arcade a)= evalStateT a $ initGame rows cols
 
 instance ComputerIO Arcade where
-  input = liftIO readLn
-  output i = collectTile i >>= \case
-    Just (Tile _ _ Block) -> modify (\s -> s { blockTiles = blockTiles s + 1 })
-    _ -> return ()
+  input = do
+    drawUI
+    liftIO $ getChar >>= \case
+      'a' -> return (-2)
+      'd' -> return 2
+      _ -> return 0
 
-collectTile :: Integer -> Arcade (Maybe Tile)
-collectTile i =
+  output i = collectTriple i >>= \case
+    Just (-1,0,s) -> modify (\g -> g { score = s})
+    Just (x,y,t) -> maybe (return ()) (setTile x y) $ parseTileId t
+    Nothing -> return ()
+
+collectTriple :: Integer -> Arcade (Maybe (Int,Int,Int))
+collectTriple i =
   gets unfinishedTile >>= \case
     [y,x] -> do
       modify (\s -> s { unfinishedTile = [] })
-      return $ Just (Tile x y $ parseTileId i)
+      return $ Just (fromInteger x, fromInteger y, fromInteger i)
     is -> do
       modify (\s -> s { unfinishedTile = (i:is) })
       return Nothing
+
+setTile :: Int -> Int -> Tile -> Arcade ()
+setTile x y t = modify $ \s -> do
+  let ts = tiles s
+  s { tiles = ts // [(y, (ts ! y) // [(x, t)])] }
+
+allTiles :: Arcade [Tile]
+allTiles = join . map Vector.toList . Vector.toList <$> gets tiles
+
+drawUI :: Arcade ()
+drawUI = get >>= \g -> liftIO $ drawScore g >> drawGame g
+
+drawScore :: Game -> IO ()
+drawScore g = putStrLn $ "Score: " ++ show (score g)
+
+drawGame :: Game -> IO ()
+drawGame g = drawRows (tiles g)
+ where
+  drawRows = mapM_ drawCells . Vector.toList
+  drawCells = putStrLn . map renderTile . Vector.toList
+
+renderTile :: Tile -> Char
+renderTile Empty  = ' '
+renderTile Wall   = '+'
+renderTile Block  = '#'
+renderTile Paddle = '='
+renderTile Ball   = 'O'
 
 main :: IO ()
 main = do
@@ -243,5 +275,7 @@ main = do
     . (Text.split (== ',') . Text.decodeUtf8)
     <$> BS.readFile "day13-input.txt"
   -- part one
-  cnt <- runArcade $ void (runComputer program) >> gets blockTiles
-  print cnt
+  -- cnt <- runArcade 25 44 $ void (runComputer program) >> length . filter (== Block) <$> allTiles
+  -- print cnt
+  -- part two
+  runArcade 24 44 $ void (runComputer $ program // [(0, 2)])
