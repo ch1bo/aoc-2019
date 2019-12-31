@@ -44,35 +44,46 @@ parseReaction = do
     return $ (c,i)
 
 -- | Simplify reaction to 'FUEL' until only 'ORE' is in the inputs.
--- 'ORE' for one 'FUEL'.
 requiredOre :: [Reaction] -> Int
-requiredOre rs =
-  case partition ((== "FUEL") . resultName) rs of
-    ([r], rs') -> go r rs'
-    _ -> 0
+requiredOre rs = fromMaybe 0 $ do
+  r <- lookupFuel rs
+  onlyOre r <|> Just (requiredOre $ simplifyInputs r)
  where
+  lookupFuel = find ((== "FUEL") . resultName)
+
   resultName (R (n,_) _) = n
+
+  simplifyInputs (R _ is) = foldr (\(c,_) xs -> simplify c xs) rs $ Map.toList is
 
   onlyOre (R _ is) | Map.size is == 1 = Map.lookup "ORE" is
   onlyOre _ = Nothing
 
-  go r rs =
-    case onlyOre r of
-      Just x -> x
-      Nothing -> go (simplify rs r) rs
+  -- go [("ORE", x)] rs = x
+  go ((c,_):cs) rs =
+    go cs $ simplify c rs
+  go x rs = trace ("go " ++ show x) 0
 
-simplify :: [Reaction] -> Reaction -> Reaction
-simplify rs a = fromMaybe a $ foldl' go Nothing rs
+-- | Simplify by finding all free reactions and substitute them.
+simplify :: Chemical -> [Reaction] -> [Reaction]
+simplify _ [] = []
+simplify n rs =
+  case findFree n of
+    Just fr -> map (substitute fr) $ rs \\ [fr]
+    Nothing -> rs
  where
-  go Nothing r = substitute r a
-  go (Just res) _ = Just res
+  -- | A 'free' reaction is only used in one reaction as input.
+  isFree r = 1 == length (filter (\(R _ is) -> Map.member (resultName r) is) rs)
+
+  findFree n = find (\r -> resultName r == n && isFree r) rs
+
+  resultName (R (n,_) _) = n
 
 -- | Substitue the first reaction into intputs of the second reaction.
-substitute :: Reaction -> Reaction -> Maybe Reaction
-substitute a@(R (an,ac) as) (R br bs) = do
+substitute :: Reaction -> Reaction -> Reaction
+substitute a@(R (an,ac) as) b@(R br bs) = fromMaybe b $ do
   req <- Map.lookup an bs -- required amount of chemical a in inputs of b
   let r = R br $ replace req
-  trace ("substitute: " ++ show a) return r
+  trace ("substitute: " ++ show a ++ " into " ++ show br) return r
  where
   replace req = Map.unionWith (+) (Map.delete an bs) (fmap (convert req ac) as)
 
@@ -100,12 +111,21 @@ main = do
   --             \7 DCFZ, 7 PSHF => 2 XJWVT\n\
   --             \165 ORE => 2 GPVTF\n\
   --             \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
+  -- let input = "2 VPVL, 7 FWMGM, 2 CXFTF, 11 MNCFX => 1 STKFG\n\
+  --             \17 NVRVD, 3 JNWZP => 8 VPVL\n\
+  --             \53 STKFG, 6 MNCFX, 46 VJHF, 81 HVMC, 68 CXFTF, 25 GNMV => 1 FUEL\n\
+  --             \22 VJHF, 37 MNCFX => 5 FWMGM\n\
+  --             \139 ORE => 4 NVRVD\n\
+  --             \144 ORE => 7 JNWZP\n\
+  --             \5 MNCFX, 7 RFSQX, 2 FWMGM, 2 VPVL, 19 CXFTF => 3 HVMC\n\
+  --             \5 VJHF, 7 MNCFX, 9 VPVL, 37 CXFTF => 6 GNMV\n\
+  --             \145 ORE => 6 MNCFX\n\
+  --             \1 NVRVD => 8 CXFTF\n\
+  --             \1 VJHF, 6 MNCFX => 4 RFSQX\n\
+  --             \176 ORE => 6 VJHF"
   case parse (sepEndBy1 parseReaction newline) "test" input of
     Left e   -> putStrLn $ errorBundlePretty e
     Right rs -> do
-      let xs = reverse $ sort rs
-      mapM_ print xs
+      mapM_ print rs
       putStrLn "--------"
-      mapM_ print $ take 16 $ iterate (simplify xs) $ xs !! 1
-      -- putStrLn "--------"
-      -- print (requiredOre xs)
+      print (requiredOre rs)
