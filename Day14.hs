@@ -7,6 +7,7 @@ import Debug.Trace
 import           Data.Void
 import           Data.Map (Map)
 import           Data.List
+import           Data.Maybe
 import           Data.Foldable
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
@@ -15,13 +16,16 @@ import qualified Data.Map as Map
 
 type Chemical = String
 
-data Reaction = R (Chemical, Int) (Map Chemical Int)
+data Reaction = R (Chemical, Int) (Map Chemical Int) deriving Eq
 
 instance Show Reaction where
   show (R c cs) =
     (intercalate ", " $ map showC $ Map.toList cs) ++ " => " ++ showC c
    where
     showC (c,i) = c ++ "(" ++ show i ++ ")"
+
+instance Ord Reaction where
+  (R _ as) <= (R _ bs) = Map.size as <= Map.size bs
 
 type Parser = Parsec Void String
 
@@ -39,7 +43,7 @@ parseReaction = do
     c <- some upperChar
     return $ (c,i)
 
--- | Fold all reactions from 'FUEL' until 'ORE' and collect required amount of
+-- | Simplify reaction to 'FUEL' until only 'ORE' is in the inputs.
 -- 'ORE' for one 'FUEL'.
 requiredOre :: [Reaction] -> Int
 requiredOre rs =
@@ -58,13 +62,17 @@ requiredOre rs =
       Nothing -> go (simplify rs r) rs
 
 simplify :: [Reaction] -> Reaction -> Reaction
-simplify rs a = foldr substitute a rs
+simplify rs a = fromMaybe a $ foldl' go Nothing rs
+ where
+  go Nothing r = substitute r a
+  go (Just res) _ = Just res
 
 -- | Substitue the first reaction into intputs of the second reaction.
-substitute :: Reaction -> Reaction -> Reaction
--- substitute (R _ as) b | Map.size as == 1 && Map.member "ORE" as = b
-substitute (R (an,ac) as) (R br bs) =
-  R br $ maybe bs replace $ Map.lookup an bs
+substitute :: Reaction -> Reaction -> Maybe Reaction
+substitute a@(R (an,ac) as) (R br bs) = do
+  req <- Map.lookup an bs -- required amount of chemical a in inputs of b
+  let r = R br $ replace req
+  trace ("substitute: " ++ show a) return r
  where
   replace req = Map.unionWith (+) (Map.delete an bs) (fmap (convert req ac) as)
 
@@ -75,7 +83,7 @@ substitute (R (an,ac) as) (R br bs) =
 
 main :: IO ()
 main = do
-  -- input <- lines <$> readFile "day14-input.txt"
+  input <- readFile "day14-input.txt"
   -- let input = "9 ORE => 2 A\n\
   --             \8 ORE => 3 B\n\
   --             \7 ORE => 5 C\n\
@@ -83,19 +91,21 @@ main = do
   --             \5 B, 7 C => 1 BC\n\
   --             \4 C, 1 A => 1 CA\n\
   --             \2 AB, 3 BC, 4 CA => 1 FUEL"
-  let input = "157 ORE => 5 NZVS\n\
-              \165 ORE => 6 DCFZ\n\
-              \44 XJWVT, 5 KHKGT, 1 QDVJ, 29 NZVS, 9 GPVTF, 48 HKGWZ => 1 FUEL\n\
-              \12 HKGWZ, 1 GPVTF, 8 PSHF => 9 QDVJ\n\
-              \179 ORE => 7 PSHF\n\
-              \177 ORE => 5 HKGWZ\n\
-              \7 DCFZ, 7 PSHF => 2 XJWVT\n\
-              \165 ORE => 2 GPVTF\n\
-              \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
-  case parse (many parseReaction) "test" input of
+  -- let input = "157 ORE => 5 NZVS\n\
+  --             \165 ORE => 6 DCFZ\n\
+  --             \44 XJWVT, 5 KHKGT, 1 QDVJ, 29 NZVS, 9 GPVTF, 48 HKGWZ => 1 FUEL\n\
+  --             \12 HKGWZ, 1 GPVTF, 8 PSHF => 9 QDVJ\n\
+  --             \179 ORE => 7 PSHF\n\
+  --             \177 ORE => 5 HKGWZ\n\
+  --             \7 DCFZ, 7 PSHF => 2 XJWVT\n\
+  --             \165 ORE => 2 GPVTF\n\
+  --             \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
+  case parse (sepEndBy1 parseReaction newline) "test" input of
     Left e   -> putStrLn $ errorBundlePretty e
     Right rs -> do
-      mapM_ print rs
+      let xs = reverse $ sort rs
+      mapM_ print xs
       putStrLn "--------"
-      mapM_ print $ take 5 $ iterate (simplify rs) (rs !! 2)
-      -- print (requiredOre rs)
+      mapM_ print $ take 16 $ iterate (simplify xs) $ xs !! 1
+      -- putStrLn "--------"
+      -- print (requiredOre xs)
