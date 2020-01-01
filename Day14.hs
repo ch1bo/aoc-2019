@@ -16,16 +16,19 @@ import qualified Data.Map as Map
 
 type Chemical = String
 
-data Reaction = R (Chemical, Int) (Map Chemical Int) deriving Eq
+data Reaction = R { resultName :: Chemical
+                  , resultCount :: Int
+                  , inputs :: Map Chemical Int
+                  } deriving Eq
 
 instance Show Reaction where
-  show (R c cs) =
-    (intercalate ", " $ map showC $ Map.toList cs) ++ " => " ++ showC c
+  show r =
+    (intercalate ", " $ map showC $ Map.toList (inputs r)) ++ " => " ++ showC (resultName r, resultCount r)
    where
     showC (c,i) = c ++ "(" ++ show i ++ ")"
 
 instance Ord Reaction where
-  (R _ as) <= (R _ bs) = Map.size as <= Map.size bs
+  (R _ _ as) <= (R _ _ bs) = Map.size as <= Map.size bs
 
 type Parser = Parsec Void String
 
@@ -33,8 +36,8 @@ parseReaction :: Parser Reaction
 parseReaction = do
   cs <- chemical `sepBy` (char ',')
   space >> string "=>"
-  c <- chemical
-  return $ R c $ Map.fromList cs
+  (c,i) <- chemical
+  return $ R c i $ Map.fromList cs
  where
   chemical = do
     space
@@ -51,11 +54,9 @@ requiredOre rs = fromMaybe 0 $ do
  where
   lookupFuel = find ((== "FUEL") . resultName)
 
-  resultName (R (n,_) _) = n
+  simplifyInputs (R _ _ is) = foldr (\(c,_) xs -> simplify c xs) rs $ Map.toList is
 
-  simplifyInputs (R _ is) = foldr (\(c,_) xs -> simplify c xs) rs $ Map.toList is
-
-  onlyOre (R _ is) | Map.size is == 1 = Map.lookup "ORE" is
+  onlyOre (R _ _ is) | Map.size is == 1 = Map.lookup "ORE" is
   onlyOre _ = Nothing
 
   -- go [("ORE", x)] rs = x
@@ -72,18 +73,15 @@ simplify n rs =
     Nothing -> rs
  where
   -- | A 'free' reaction is only used in one reaction as input.
-  isFree r = 1 == length (filter (\(R _ is) -> Map.member (resultName r) is) rs)
+  isFree r = 1 == length (filter (\(R _ _ is) -> Map.member (resultName r) is) rs)
 
   findFree n = find (\r -> resultName r == n && isFree r) rs
 
-  resultName (R (n,_) _) = n
-
 -- | Substitue the first reaction into intputs of the second reaction.
 substitute :: Reaction -> Reaction -> Reaction
-substitute a@(R (an,ac) as) b@(R br bs) = fromMaybe b $ do
+substitute a@(R an ac as) b@(R bn bc bs) = fromMaybe b $ do
   req <- Map.lookup an bs -- required amount of chemical a in inputs of b
-  let r = R br $ replace req
-  trace ("substitute: " ++ show a ++ " into " ++ show br) return r
+  return $ R bn bc $ replace req
  where
   replace req = Map.unionWith (+) (Map.delete an bs) (fmap (convert req ac) as)
 
@@ -94,7 +92,7 @@ substitute a@(R (an,ac) as) b@(R br bs) = fromMaybe b $ do
 
 main :: IO ()
 main = do
-  input <- readFile "day14-input.txt"
+  -- input <- readFile "day14-input.txt"
   -- let input = "9 ORE => 2 A\n\
   --             \8 ORE => 3 B\n\
   --             \7 ORE => 5 C\n\
@@ -102,15 +100,15 @@ main = do
   --             \5 B, 7 C => 1 BC\n\
   --             \4 C, 1 A => 1 CA\n\
   --             \2 AB, 3 BC, 4 CA => 1 FUEL"
-  -- let input = "157 ORE => 5 NZVS\n\
-  --             \165 ORE => 6 DCFZ\n\
-  --             \44 XJWVT, 5 KHKGT, 1 QDVJ, 29 NZVS, 9 GPVTF, 48 HKGWZ => 1 FUEL\n\
-  --             \12 HKGWZ, 1 GPVTF, 8 PSHF => 9 QDVJ\n\
-  --             \179 ORE => 7 PSHF\n\
-  --             \177 ORE => 5 HKGWZ\n\
-  --             \7 DCFZ, 7 PSHF => 2 XJWVT\n\
-  --             \165 ORE => 2 GPVTF\n\
-  --             \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
+  let input = "157 ORE => 5 NZVS\n\
+              \165 ORE => 6 DCFZ\n\
+              \44 XJWVT, 5 KHKGT, 1 QDVJ, 29 NZVS, 9 GPVTF, 48 HKGWZ => 1 FUEL\n\
+              \12 HKGWZ, 1 GPVTF, 8 PSHF => 9 QDVJ\n\
+              \179 ORE => 7 PSHF\n\
+              \177 ORE => 5 HKGWZ\n\
+              \7 DCFZ, 7 PSHF => 2 XJWVT\n\
+              \165 ORE => 2 GPVTF\n\
+              \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
   -- let input = "2 VPVL, 7 FWMGM, 2 CXFTF, 11 MNCFX => 1 STKFG\n\
   --             \17 NVRVD, 3 JNWZP => 8 VPVL\n\
   --             \53 STKFG, 6 MNCFX, 46 VJHF, 81 HVMC, 68 CXFTF, 25 GNMV => 1 FUEL\n\
@@ -127,5 +125,5 @@ main = do
     Left e   -> putStrLn $ errorBundlePretty e
     Right rs -> do
       mapM_ print rs
-      putStrLn "--------"
+      putStrLn "---part one-----"
       print (requiredOre rs)
