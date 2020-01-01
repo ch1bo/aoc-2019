@@ -22,9 +22,7 @@ import qualified Data.Text              as Text
 import qualified Data.Text.Encoding     as Text
 import qualified Data.Vector            as Vector
 
--- * IntCode computer
-
-type Program = Vector Integer
+type Memory = Vector Integer
 
 type Address = Int
 
@@ -45,10 +43,13 @@ data Instruction = Add Parameter Parameter Parameter
                  | Halt
                  deriving Show
 
-data IntCode = IntCode { memory :: !Program
+data IntCode = IntCode { memory :: !Memory
                        , pos    :: !Address
                        , base   :: !Address
                        } deriving Show
+
+mkIntCode :: Memory -> IntCode
+mkIntCode p = IntCode p 0 0
 
 type Computer m = (Monad m, MonadState IntCode m)
 
@@ -125,9 +126,9 @@ parseInstruction = do
     99 -> return Halt
     i -> error $ "unknown opcode: " ++ show i
 
-runComputer :: ComputerIO m => Program -> m Program
-runComputer mem =
-  fmap memory . execStateT go $ IntCode mem 0 0
+-- | Run until next 'Output' and provide given 'Integer' on every 'Input'.
+stepComputer :: Computer m => (m Integer) -> m (Maybe Integer)
+stepComputer input = go
  where
   go = do
     op <- parseInstruction
@@ -149,8 +150,7 @@ runComputer mem =
         go
       Output a -> do
         v <- lookupParameter a
-        output v
-        go
+        return $ Just v
       JumpIfTrue a to -> do
         x <- lookupParameter a
         when (x /= 0) $ lookupParameter to >>= jump . fromInteger
@@ -173,27 +173,28 @@ runComputer mem =
         x <- lookupParameter a
         offsetBase (fromInteger x)
         go
-      Halt -> return ()
-
--- * Run the computer
+      Halt -> return Nothing
 
 class Monad m => ComputerIO m where
   input :: m Integer
   output :: Integer -> m ()
 
-instance ComputerIO m => ComputerIO (StateT IntCode m) where
-  input = lift $ input
-  output = lift . output
-
 instance ComputerIO IO where
   input = readLn
   output = print
 
--- * Load programs
+-- | Run until 'Halt'.
+runComputer :: ComputerIO m => IntCode -> m IntCode
+runComputer = execStateT go
+ where
+  go = stepComputer (lift input) >>= \case
+    Nothing -> return ()
+    Just o -> lift (output o) >> go
 
-loadProgram :: FilePath -> IO Program
-loadProgram fp =
-  Vector.fromList
+loadIntCode :: FilePath -> IO IntCode
+loadIntCode fp =
+  mkIntCode
+  <$> Vector.fromList
   . map (read . Text.unpack)
   . (Text.split (== ',') . Text.decodeUtf8)
   <$> BS.readFile fp
