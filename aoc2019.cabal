@@ -1,0 +1,44 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 29306116eecc9af94d415453f8d8fb7cce17735e5418f39e6d9043ad174d1e30
+
+name:           aoc2019
+version:        0.1.0
+description:    Please see the README on GitHub at <https://github.com/ch1bo/aoc-2019#readme>
+homepage:       https://github.com/ch1bo/aoc-2019#readme
+bug-reports:    https://github.com/ch1bo/aoc-2019/issues
+author:         Sebastian Nagel
+copyright:      2020 Sebastian Nagel
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/ch1bo/aoc-2019
+
+library
+  exposed-modules:
+      Lib
+  other-modules:
+      Paths_aoc2019
+  hs-source-dirs:
+      src
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+  default-language: Haskell2010
+
+executable day15
+  main-is: Main.hs
+  other-modules:
+      Paths_aoc2019
+  hs-source-dirs:
+      day15
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aoc2019
+    , base >=4.7 && <5
+  default-language: Haskell2010

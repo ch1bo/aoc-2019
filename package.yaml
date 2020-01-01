@@ -1,0 +1,24 @@
+name:                aoc2019
+version:             0.1.0
+github:              "ch1bo/aoc-2019"
+author:              "Sebastian Nagel"
+copyright:           "2020 Sebastian Nagel"
+description:         Please see the README on GitHub at <https://github.com/ch1bo/aoc-2019#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+
+ghc-options:
+  - -threaded
+  - -rtsopts
+  - -with-rtsopts=-N
+
+executables:
+  day15:
+    main:                Main.hs
+    source-dirs:         day15
+    dependencies:
+      - aoc2019
