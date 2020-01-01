@@ -1,5 +1,6 @@
 #!/usr/bin/env stack
 -- stack script --resolver lts-14.4 --package containers,megaparsec
+{-# LANGUAGE MultiWayIf #-}
 module Main where
 
 import Debug.Trace
@@ -17,8 +18,8 @@ import qualified Data.Map as Map
 type Chemical = String
 
 data Reaction = R { resultName :: Chemical
-                  , resultCount :: Int
-                  , inputs :: Map Chemical Int
+                  , resultCount :: Integer
+                  , inputs :: Map Chemical Integer
                   } deriving Eq
 
 instance Show Reaction where
@@ -47,7 +48,7 @@ parseReaction = do
     return $ (c,i)
 
 -- | Simplify reaction to 'FUEL' until only 'ORE' is in the inputs.
-requiredOre :: [Reaction] -> Int
+requiredOre :: [Reaction] -> Integer
 requiredOre rs = fromMaybe 0 $ do
   r <- lookupFuel rs
   onlyOre r <|> Just (requiredOre $ simplifyInputs r)
@@ -90,9 +91,40 @@ substitute a@(R an ac as) b@(R bn bc bs) = fromMaybe b $ do
     | required `mod` produced == 0 = required `div` produced * input
     | otherwise = (required `div` produced + 1) * input
 
+-- | Search for the maximum FUEL output possible with given max ORE. Requires
+-- modification of the FUEL reaction to ensure intermediate chemicals are summed
+-- up without unnecessary losses.
+maxFuelForOre :: Integer -> [Reaction] -> (Integer, Integer)
+maxFuelForOre max rs = go start
+ where
+  oreForOneFuel = toInteger $ requiredOre rs
+
+  start = max `div` oreForOneFuel
+
+  go n =
+    let res = requiredOre $ multiplyReaction (n) "FUEL" rs
+        next = requiredOre $ multiplyReaction (n+1) "FUEL" rs
+    in  if | res == max -> (n, res)
+           | res < max && next > max -> (n, res)
+           | res < max -> go (n + 1 + (max - res) `div` oreForOneFuel)
+           | res > max -> go (n - 1 - (res - max) `div` oreForOneFuel)
+
+modifyReaction :: (Reaction -> Reaction) -> Chemical -> [Reaction] -> [Reaction]
+modifyReaction f k rs =
+  case partition (\r -> resultName r == k) rs of
+    ([r], rs') -> f r : rs'
+    _ -> rs
+
+multiplyReaction :: Integer -> Chemical -> [Reaction] -> [Reaction]
+multiplyReaction n k rs = modifyReaction mul k rs
+ where
+  mul r= r { resultCount = (resultCount r) * n
+           , inputs = fmap (* n) $ inputs r
+           }
+
 main :: IO ()
 main = do
-  -- input <- readFile "day14-input.txt"
+  input <- readFile "day14-input.txt"
   -- let input = "9 ORE => 2 A\n\
   --             \8 ORE => 3 B\n\
   --             \7 ORE => 5 C\n\
@@ -100,15 +132,15 @@ main = do
   --             \5 B, 7 C => 1 BC\n\
   --             \4 C, 1 A => 1 CA\n\
   --             \2 AB, 3 BC, 4 CA => 1 FUEL"
-  let input = "157 ORE => 5 NZVS\n\
-              \165 ORE => 6 DCFZ\n\
-              \44 XJWVT, 5 KHKGT, 1 QDVJ, 29 NZVS, 9 GPVTF, 48 HKGWZ => 1 FUEL\n\
-              \12 HKGWZ, 1 GPVTF, 8 PSHF => 9 QDVJ\n\
-              \179 ORE => 7 PSHF\n\
-              \177 ORE => 5 HKGWZ\n\
-              \7 DCFZ, 7 PSHF => 2 XJWVT\n\
-              \165 ORE => 2 GPVTF\n\
-              \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
+  -- let input = "157 ORE => 5 NZVS\n\
+  --             \165 ORE => 6 DCFZ\n\
+  --             \44 XJWVT, 5 KHKGT, 1 QDVJ, 29 NZVS, 9 GPVTF, 48 HKGWZ => 1 FUEL\n\
+  --             \12 HKGWZ, 1 GPVTF, 8 PSHF => 9 QDVJ\n\
+  --             \179 ORE => 7 PSHF\n\
+  --             \177 ORE => 5 HKGWZ\n\
+  --             \7 DCFZ, 7 PSHF => 2 XJWVT\n\
+  --             \165 ORE => 2 GPVTF\n\
+  --             \3 DCFZ, 7 NZVS, 5 HKGWZ, 10 PSHF => 8 KHKGT"
   -- let input = "2 VPVL, 7 FWMGM, 2 CXFTF, 11 MNCFX => 1 STKFG\n\
   --             \17 NVRVD, 3 JNWZP => 8 VPVL\n\
   --             \53 STKFG, 6 MNCFX, 46 VJHF, 81 HVMC, 68 CXFTF, 25 GNMV => 1 FUEL\n\
@@ -126,4 +158,6 @@ main = do
     Right rs -> do
       mapM_ print rs
       putStrLn "---part one-----"
-      print (requiredOre rs)
+      print $ requiredOre rs
+      putStrLn "---part two-----"
+      print $ maxFuelForOre 1000000000000 rs
