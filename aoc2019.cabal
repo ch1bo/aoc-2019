@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 29306116eecc9af94d415453f8d8fb7cce17735e5418f39e6d9043ad174d1e30
+-- hash: ddc55dd92d9df554cca1d9a53c249798b4e0510b43fcf6105c9ffcb64a9ba809
 
 name:           aoc2019
 version:        0.1.0
@@ -21,14 +21,18 @@ source-repository head
 
 library
   exposed-modules:
+      Computer
       Lib
   other-modules:
       Paths_aoc2019
   hs-source-dirs:
       src
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , bytestring
+    , mtl
+    , text
+    , vector
   default-language: Haskell2010
 
 executable day15
@@ -41,4 +45,8 @@ executable day15
   build-depends:
       aoc2019
     , base >=4.7 && <5
+    , bytestring
+    , mtl
+    , text
+    , vector
   default-language: Haskell2010
