@@ -24,8 +24,8 @@ instance Enum Movement where
   fromEnum West = 3
   fromEnum East = 4
 
-data Status = Wall | Moved | Found
-            deriving (Enum, Show)
+data Status = Wall | Empty | Oxygen
+            deriving (Enum, Eq, Show)
 
 step :: IntCode -> Movement -> (Status, IntCode)
 step ic m =
@@ -33,28 +33,39 @@ step ic m =
     Nothing -> error "unexpected halt"
     Just o -> return $ toEnum $ fromInteger o
 
-type Path = [Movement]
+data Node = Node IntCode Int Int Status
 
-next :: Path -> [Path]
-next [] = [North:[], South:[], West:[], East:[]]
-next p@(North:_) = [North:p, West:p, East:p]
-next p@(South:_) = [South:p, West:p, East:p]
-next p@(West:_) = [West:p, North:p, South:p]
-next p@(East:_) = [East:p, North:p, South:p]
+instance Eq Node where
+  (Node _ x1 y1 s1) == (Node _ x2 y2 s2) = (x1,y1,s1) == (x2,y2,s2)
 
-bfs :: IntCode -> Maybe [Movement]
-bfs ic = go $ map (ic,) $ next []
+instance Show Node where
+  show (Node _ x y s) = show s ++ " (" ++ show x ++ "," ++ show y ++ ")"
+
+nextNode :: Node -> [Node]
+nextNode (Node ic x y _) =
+  foldr move [] [North, South, West, East]
  where
-  go [] = Nothing
-  go ((_, []):open) = go open
-  go ((ic, path):open) =
-    case step ic $ head path of
-      (Found, _) -> Just path
-      (Moved, ic') -> go $ open ++ (map (ic',) $ next path)
-      (Wall, _) -> go open
+  move d ns =
+    case step ic d of
+      (Wall, _) -> ns
+      (s, ic') -> (node ic' s d) : ns
+
+  node ic' s North = Node ic' x (y+1) s
+  node ic' s South = Node ic' x (y-1) s
+  node ic' s West = Node ic' (x-1) y s
+  node ic' s East = Node ic' (x+1) y s
+
+bfs :: Eq a => (a -> [a]) -> (a -> Bool) -> a -> Maybe [a]
+bfs next done = go [] . map ([],) . next
+ where
+  go _ [] = Nothing
+  go close ((path, a):open)
+    | done a = Just $ reverse (a:path)
+    | a `elem` close = go close open
+    | otherwise = go (a:close) (open ++ (map (a:path,) $ next a))
 
 main :: IO ()
 main = do
   program <- loadIntCode "day15/input.txt"
   -- part one
-  print $ length <$> bfs program
+  print $ fmap length $ bfs nextNode (\(Node _ _ _ s) -> s == Oxygen) $ Node program 0 0 Empty
