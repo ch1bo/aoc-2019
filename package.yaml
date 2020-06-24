@@ -11,6 +11,9 @@ dependencies:
   - vector
   - bytestring
   - text
+  - safe
+  - extra
+  - containers
 
 library:
   source-dirs: src

@@ -1,3 +1,7 @@
-resolver: lts-14.4
+resolver: lts-15.6
 packages:
   - .
+system-ghc: true
+install-ghc: false
+nix:
+  enable: false

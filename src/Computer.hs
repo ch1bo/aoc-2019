@@ -6,16 +6,9 @@
 {-# LANGUAGE TupleSections              #-}
 module Computer where
 
-import           Control.Concurrent
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Control.Monad.State
-import           Data.Foldable
-import           Data.Function
-import           Data.List
-import           Data.Maybe
-import           Data.Vector            (Vector, (!), (!?), (//))
-import           Debug.Trace
+import           Data.Vector            (Vector, (!?), (//))
 
 import qualified Data.ByteString        as BS
 import qualified Data.Text              as Text

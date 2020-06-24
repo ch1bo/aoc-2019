@@ -4,14 +4,12 @@
 module Main where
 
 import           Control.Monad
-import           Data.Function
 import           Data.List.Extra
 import           Data.Map        (Map)
 import           Data.Maybe
 import           Numeric.Natural
 
 import qualified Data.Map        as Map
-import qualified Data.Set        as Set
 
 type Wire = [Direction]
 

@@ -1,0 +1,10 @@
+cradle:
+  cabal:
+    - path: "."
+      component: "exe:day15"
+    - path: "day15"
+      component: "exe:day15"
+    - path: "src"
+      component: "aoc2019"
+    - path: "standalone"
+      component: "aoc2019"
